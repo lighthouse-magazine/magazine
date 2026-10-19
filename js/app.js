@@ -230,7 +230,6 @@
         </div>
         <div class="bar">
           <button class="btn ghost" data-bk="spread" id="bkSpread">두 쪽 보기</button>
-          <button class="btn ghost" data-bk="zoom" id="bkZoom">크게 보기</button>
           ${links}
         </div>
         <div class="thumbs" id="thumbs">${Array.from({ length: cur.pageCount }, (_, i) => `<button data-bk-page="${i + 1}" aria-label="${i + 1}쪽 ${esc(lab(i + 1))}">${thumbHtml(i)}</button>`).join('')}</div>
@@ -254,7 +253,6 @@
     $$('.arrow.r, [data-bk="next"]').forEach(b => { b.disabled = last >= cur.pageCount; });
     $('#bkSpread').textContent = isSpread() ? '한 쪽 보기' : '두 쪽 보기';
     $('#bkSpread').hidden = window.innerWidth < 900 || isLand();
-    $('#bkZoom').textContent = book.zoom ? '맞춰 보기' : '크게 보기';
     $$('#thumbs button').forEach(b => {
       const on = unit.includes(+b.dataset.bkPage);
       b.classList.toggle('on', on);
@@ -374,8 +372,7 @@
       const a = bk.dataset.bk;
       if (a === 'prev') bookStep(-1);
       else if (a === 'next') bookStep(1);
-      else if (a === 'spread') { book.spread = !book.spread; book.zoom = false; drawBook(); }
-      else if (a === 'zoom') { book.zoom = !book.zoom; drawBook(); }
+      else if (a === 'spread') { book.spread = !book.spread; drawBook(); }
       return;
     }
     const th = t.closest('[data-bk-page]');
