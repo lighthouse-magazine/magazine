@@ -115,7 +115,8 @@
   }
 
   /* ================= 읽기 모드 ================= */
-  function photoSrc(p) { return cur.dir + 'photos/' + p.f + '.jpg'; }
+  const vq = () => (cur.ver ? '?v=' + cur.ver : '');   // 이미지를 바꾼 호는 ver을 올려 캐시를 피한다
+  function photoSrc(p) { return cur.dir + 'photos/' + p.f + '.jpg' + vq(); }
   function fig(p, sec) {
     const sz = SIZES[p.f] || [3, 2];
     const label = [sec.title, p.cap].filter(Boolean).join(' · ');
@@ -203,7 +204,7 @@
     for (let i = 2; i <= cur.pageCount; i += 2) out.push(i + 1 <= cur.pageCount ? [i, i + 1] : [i]);
     return out;
   }
-  const pageSrc = n => `${cur.dir}pages/p${pad(n)}.jpg`;
+  const pageSrc = n => `${cur.dir}pages/p${pad(n)}.jpg${vq()}`;
   const lab = n => (cur.pageLabels && cur.pageLabels[n - 1]) || '';
   const isLand = () => cur.pageW > cur.pageH;      // 가로형(슬라이드) 호는 한 쪽씩만 보여줌
   const isSpread = () => book.spread && window.innerWidth >= 900 && !book.zoom && !isLand();
@@ -215,7 +216,7 @@
       const pos = n > 1 ? (i / (n - 1) * 100).toFixed(3) : 0;
       return `<span class="th" style="width:${w}px;aspect-ratio:${cur.thumbW} / ${cur.thumbH};background:url('${cur.dir}${cur.thumbSprite}') ${pos}% 0 / ${n * 100}% 100%"></span>`;
     }
-    return `<img src="${cur.dir}thumbs/p${pad(i + 1)}.jpg" alt="" loading="lazy" width="160" height="207">`;
+    return `<img src="${cur.dir}thumbs/p${pad(i + 1)}.jpg${vq()}" alt="" loading="lazy" width="160" height="207">`;
   }
 
   function renderBook() {
