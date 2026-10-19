@@ -11,7 +11,8 @@
 
   // 호수 종류: read(글+사진 읽기·책 보기), book(책으로 보기 전용), link(외부 사이트 연결)
   const kind = i => i.type || 'read';
-  const LATEST = ISS.filter(i => kind(i) === 'read').slice(-1)[0] || ISS[ISS.length - 1];
+  // 번호 없이 열면 보여줄 호: 웹에서 직접 볼 수 있는 호(읽기·책) 중 가장 최신. 호수 번호 순으로 정렬돼 있다.
+  const LATEST = ISS.filter(i => kind(i) !== 'link').slice(-1)[0] || ISS[ISS.length - 1];
 
   const app = $('#app');
   let cur = LATEST;
