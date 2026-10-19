@@ -9,8 +9,12 @@
   const nl = s => esc(s).replace(/\n/g, '<br>');
   const pad = n => String(n).padStart(2, '0');
 
+  // 호수 종류: read(글+사진 읽기·책 보기), book(책으로 보기 전용), link(외부 사이트 연결)
+  const kind = i => i.type || 'read';
+  const LATEST = ISS.filter(i => kind(i) === 'read').slice(-1)[0] || ISS[ISS.length - 1];
+
   const app = $('#app');
-  let cur = ISS[ISS.length - 1];
+  let cur = LATEST;
   let view = 'read';
   let lbList = [];
   let lbIdx = 0;
@@ -58,8 +62,8 @@
   function parseHash() {
     const [a, b, c] = location.hash.replace(/^#\/?/, '').split('/');
     if (a === 'shelf') return { view: 'shelf' };
-    const issue = ISS.find(i => i.id === +a) || ISS[ISS.length - 1];
-    if (b === 'book') return { view: 'book', issue, page: Math.max(1, Math.min(issue.pageCount, +c || 1)) };
+    const issue = ISS.find(i => i.id === +a && kind(i) !== 'link') || LATEST;
+    if (b === 'book' || kind(issue) === 'book') return { view: 'book', issue, page: Math.max(1, Math.min(issue.pageCount, +c || 1)) };
     return { view: 'read', issue };
   }
   function go(hash) { if (location.hash === hash) render(); else location.hash = hash; }
@@ -72,6 +76,7 @@
     document.body.classList.toggle('is-shelf', view === 'shelf');
     $('#segRead').setAttribute('aria-selected', view === 'read');
     $('#segBook').setAttribute('aria-selected', view === 'book');
+    $('.seg').hidden = view === 'shelf' || kind(cur) !== 'read';   // 읽기/책 전환은 글 데이터가 있는 호만
     document.title = view === 'shelf' ? '지난 호 | 등대매거진' : `${cur.title} ${cur.no} | 등대의집`;
     buildChrome();
     if (view === 'shelf') renderShelf();
@@ -84,8 +89,16 @@
   }
 
   function buildChrome() {
-    $('#chips').innerHTML = cur.sections.map(s => `<a href="#/${cur.id}" data-sec="${s.id}">${esc(s.title)}</a>`).join('');
-    $('#tocList').innerHTML = cur.sections.map(s => `<li><a href="#/${cur.id}" data-sec="${s.id}"><b>${s.no}</b><span>${esc(s.title)}</span></a></li>`).join('');
+    if (kind(cur) === 'read') {
+      $('#chips').innerHTML = cur.sections.map(s => `<a href="#/${cur.id}" data-sec="${s.id}">${esc(s.title)}</a>`).join('');
+      $('#tocList').innerHTML = cur.sections.map(s => `<li><a href="#/${cur.id}" data-sec="${s.id}"><b>${s.no}</b><span>${esc(s.title)}</span></a></li>`).join('');
+    } else {
+      // 책으로만 보는 호: 목차 대신 호수 이동 목록
+      $('#chips').innerHTML = '';
+      $('#tocList').innerHTML = ISS.slice().reverse().map(i => kind(i) === 'link'
+        ? `<li><a href="${esc(i.url)}" target="_blank" rel="noopener"><b>${i.id}</b><span>${esc(i.season)} ↗</span></a></li>`
+        : `<li><a href="#/${i.id}"${i.id === cur.id ? ' aria-current="page"' : ''}><b>${i.id}</b><span>${esc(i.season)}</span></a></li>`).join('');
+    }
   }
 
   function scrollToSec(id) {
@@ -190,10 +203,23 @@
     return out;
   }
   const pageSrc = n => `${cur.dir}pages/p${pad(n)}.jpg`;
-  const isSpread = () => book.spread && window.innerWidth >= 900 && !book.zoom;
+  const lab = n => (cur.pageLabels && cur.pageLabels[n - 1]) || '';
+  const isLand = () => cur.pageW > cur.pageH;      // 가로형(슬라이드) 호는 한 쪽씩만 보여줌
+  const isSpread = () => book.spread && window.innerWidth >= 900 && !book.zoom && !isLand();
   function unitOf(p) { return isSpread() ? spreads().find(s => s.includes(p)) : [p]; }
 
+  function thumbHtml(i) {
+    const n = cur.pageCount, w = isLand() ? 112 : 70;
+    if (cur.thumbSprite) {   // 썸네일 한 장(스프라이트)에서 잘라 쓴다
+      const pos = n > 1 ? (i / (n - 1) * 100).toFixed(3) : 0;
+      return `<span class="th" style="width:${w}px;aspect-ratio:${cur.thumbW} / ${cur.thumbH};background:url('${cur.dir}${cur.thumbSprite}') ${pos}% 0 / ${n * 100}% 100%"></span>`;
+    }
+    return `<img src="${cur.dir}thumbs/p${pad(i + 1)}.jpg" alt="" loading="lazy" width="160" height="207">`;
+  }
+
   function renderBook() {
+    const links = kind(cur) === 'read' ? `<a class="btn ghost" href="#/${cur.id}">글로 읽기</a>` :
+      `${cur.original ? `<a class="btn ghost" href="${esc(cur.original)}" target="_blank" rel="noopener">원본 열기 ↗</a>` : ''}<a class="btn ghost" href="#/shelf">지난 호 목록</a>`;
     app.innerHTML = `
       <div class="book">
         <div class="stage" id="stage"></div>
@@ -205,9 +231,9 @@
         <div class="bar">
           <button class="btn ghost" data-bk="spread" id="bkSpread">두 쪽 보기</button>
           <button class="btn ghost" data-bk="zoom" id="bkZoom">크게 보기</button>
-          <a class="btn ghost" href="#/${cur.id}">글로 읽기</a>
+          ${links}
         </div>
-        <div class="thumbs" id="thumbs">${Array.from({ length: cur.pageCount }, (_, i) => `<button data-bk-page="${i + 1}" aria-label="${i + 1}쪽 ${esc(cur.pageLabels[i])}"><img src="${cur.dir}thumbs/p${pad(i + 1)}.jpg" alt="" loading="lazy" width="160" height="207"></button>`).join('')}</div>
+        <div class="thumbs" id="thumbs">${Array.from({ length: cur.pageCount }, (_, i) => `<button data-bk-page="${i + 1}" aria-label="${i + 1}쪽 ${esc(lab(i + 1))}">${thumbHtml(i)}</button>`).join('')}</div>
       </div>`;
     drawBook();
   }
@@ -217,16 +243,17 @@
     const two = unit.length === 2;
     book.page = unit[0];
     const st = $('#stage');
-    st.className = 'stage ' + (book.zoom ? 'zoom ' : '') + (isSpread() ? 'spread' : 'single');
+    st.className = 'stage ' + (book.zoom ? 'zoom ' : '') + (isSpread() ? 'spread' : 'single') + (isLand() ? ' land' : '');
+    const iw = cur.pageW || 1224, ih = cur.pageH || 1584;
     st.innerHTML = `<button class="arrow l" data-bk="prev" aria-label="이전 쪽">‹</button>` +
-      unit.map(n => `<div class="pg"><img src="${pageSrc(n)}" width="1224" height="1584" alt="${n}쪽 ${esc(cur.pageLabels[n - 1])} 원본 페이지"></div>`).join('') +
+      unit.map(n => `<div class="pg"><img src="${pageSrc(n)}" width="${iw}" height="${ih}" alt="${n}쪽 ${esc(lab(n))} 원본 페이지"></div>`).join('') +
       `<button class="arrow r" data-bk="next" aria-label="다음 쪽">›</button>`;
     const last = unit[unit.length - 1];
-    $('#bkInfo').innerHTML = `<b>${two ? `${unit[0]}–${last}` : unit[0]}</b> / ${cur.pageCount}쪽<br><small>${esc(cur.pageLabels[unit[0] - 1])}</small>`;
+    $('#bkInfo').innerHTML = `<b>${two ? `${unit[0]}–${last}` : unit[0]}</b> / ${cur.pageCount}쪽${lab(unit[0]) ? `<br><small>${esc(lab(unit[0]))}</small>` : ''}`;
     $$('.arrow.l, [data-bk="prev"]').forEach(b => { b.disabled = unit[0] <= 1; });
     $$('.arrow.r, [data-bk="next"]').forEach(b => { b.disabled = last >= cur.pageCount; });
     $('#bkSpread').textContent = isSpread() ? '한 쪽 보기' : '두 쪽 보기';
-    $('#bkSpread').hidden = window.innerWidth < 900;
+    $('#bkSpread').hidden = window.innerWidth < 900 || isLand();
     $('#bkZoom').textContent = book.zoom ? '맞춰 보기' : '크게 보기';
     $$('#thumbs button').forEach(b => {
       const on = unit.includes(+b.dataset.bkPage);
@@ -245,8 +272,11 @@
 
   /* ================= 서가 ================= */
   function renderShelf() {
-    app.innerHTML = `<div class="wrap shelf"><h2>지난 호 보기</h2><div class="shelf-cards">${ISS.slice().reverse().map(i =>
-      `<a class="card" href="#/${i.id}"><img src="${i.dir}${i.cover}" alt="${esc(i.title)} ${esc(i.no)} 표지" width="816" height="1056"><b>${esc(i.no)}</b><span>${esc(i.season)}</span></a>`).join('')}</div></div>`;
+    const how = i => kind(i) === 'link' ? `${esc(i.badge || '외부 사이트')} ↗` : kind(i) === 'book' ? '책으로 보기' : '읽기 · 책으로 보기';
+    app.innerHTML = `<div class="wrap shelf"><h2>지난 호 보기</h2><div class="shelf-cards">${ISS.slice().reverse().map(i => {
+      const ext = kind(i) === 'link' ? ` href="${esc(i.url)}" target="_blank" rel="noopener"` : ` href="#/${i.id}"`;
+      return `<a class="card"${ext}><img src="${i.dir}${i.cover}" alt="${esc(i.title)} ${esc(i.no)} 표지" width="816" height="1056" loading="lazy"><b>${esc(i.no)}</b><span>${esc(i.season)}</span><em>${how(i)}</em></a>`;
+    }).join('')}</div></div>`;
   }
 
   /* ================= 라이트박스 ================= */
@@ -259,35 +289,60 @@
   }
 
   /* ================= 검색 ================= */
+  // 모든 호수를 한 번에 검색: 읽기 호는 꼭지·캡션·후원자 이름 단위, 책 호는 쪽 단위
   function buildIndex() {
     const idx = [];
-    const add = (s, label, text, extra = {}) => { if (text) idx.push({ s, label, text: String(text).replace(/\n/g, ' '), ...extra }); };
-    cur.sections.forEach(s => {
-      add(s, s.title, s.title + ' ' + (s.intro || ''));
-      add(s, s.title, [s.quote, s.body, s.closing].filter(Boolean).join(' '));
-      (s.groups || []).forEach(g => { add(s, s.title, g.sub); (g.photos || []).forEach(p => add(s, s.title, p.cap)); });
-      (s.photos || []).forEach(p => add(s, s.title, [p.cap, p.desc].filter(Boolean).join(' — ')));
-      (s.wishes || []).forEach(w => add(s, '필요 물품 · ' + w.name, w.items.join(', ')));
-      (s.notes || []).forEach(n => add(s, s.title, n));
-      (s.info || []).forEach(n => add(s, s.title, n));
-      if (s.company) add(s, s.title, s.company + ' ' + s.intro);
-      (s.donors || []).forEach(d => d.names.split(/\s+/).filter(Boolean).forEach(n => add(s, '후원자 · ' + d.name, n, { donor: n })));
+    ISS.slice().reverse().forEach(iss => {   // 최신 호가 먼저 나오게
+      const tag = `제${iss.id}호`;
+      if (kind(iss) === 'book') {
+        (iss.texts || []).forEach((t, i) => { if (t) idx.push({ issue: iss, page: i + 1, label: `${tag} · ${i + 1}쪽`, text: t }); });
+        return;
+      }
+      if (kind(iss) !== 'read') return;
+      const add = (s, label, text, extra = {}) => { if (text) idx.push({ issue: iss, s, label: `${tag} · ${label}`, text: String(text).replace(/\n/g, ' '), ...extra }); };
+      iss.sections.forEach(s => {
+        add(s, s.title, s.title + ' ' + (s.intro || ''));
+        add(s, s.title, [s.quote, s.body, s.closing].filter(Boolean).join(' '));
+        (s.groups || []).forEach(g => { add(s, s.title, g.sub); (g.photos || []).forEach(p => add(s, s.title, p.cap)); });
+        (s.photos || []).forEach(p => add(s, s.title, [p.cap, p.desc].filter(Boolean).join(' — ')));
+        (s.wishes || []).forEach(w => add(s, '필요 물품 · ' + w.name, w.items.join(', ')));
+        (s.notes || []).forEach(n => add(s, s.title, n));
+        (s.info || []).forEach(n => add(s, s.title, n));
+        if (s.company) add(s, s.title, s.company + ' ' + s.intro);
+        (s.donors || []).forEach(d => d.names.split(/\s+/).filter(Boolean).forEach(n => add(s, '후원자 · ' + d.name, n, { donor: n })));
+      });
     });
     return idx;
   }
-  let searchIdx = null, searchFor = null;
+  // 공백을 무시하고 찾는다(PDF 글은 이름 사이에 공백이 끼는 경우가 있음). 찾은 범위를 원문 기준으로 돌려준다.
+  function locate(text, q) {
+    const map = [];
+    let s = '';
+    for (let i = 0; i < text.length; i++) { if (!/\s/.test(text[i])) { map.push(i); s += text[i].toLowerCase(); } }
+    const k = s.indexOf(q);
+    return k < 0 ? null : { a: map[k], b: map[k + q.length - 1] + 1 };
+  }
+  // 긴 글은 찾은 말 앞뒤만 잘라 보여주고, 찾은 말은 표시한다
+  function snippetHtml(text, m) {
+    const from = text.length <= 90 ? 0 : Math.max(0, m.a - 34);
+    const to = text.length <= 90 ? text.length : Math.min(text.length, m.b + 48);
+    return (from ? '…' : '') + esc(text.slice(from, m.a)) + '<mark>' + esc(text.slice(m.a, m.b)) + '</mark>' + esc(text.slice(m.b, to)) + (to < text.length ? '…' : '');
+  }
+  let searchIdx = null;
   function runSearch(q) {
     const out = $('#qOut');
     q = q.trim();
-    if (!q) { out.innerHTML = '<p class="empty">찾고 싶은 이름이나 단어를 입력해 주세요.</p>'; return; }
-    if (searchFor !== cur) { searchIdx = buildIndex(); searchFor = cur; }
-    const low = q.toLowerCase();
-    const hits = searchIdx.filter(e => e.text.toLowerCase().includes(low)).slice(0, 40);
-    const re = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
-    out.innerHTML = hits.length ? hits.map((e, i) =>
-      `<a href="#/${cur.id}" data-hit="${i}"><small>${esc(e.label)}</small><span>${esc(e.text).replace(re, m => `<mark>${m}</mark>`)}</span></a>`).join('')
+    if (!q) { out.innerHTML = '<p class="empty">찾고 싶은 이름이나 단어를 입력해 주세요.<br><small>모든 호수에서 한 번에 찾아줍니다.</small></p>'; return; }
+    if (!searchIdx) searchIdx = buildIndex();
+    const key = q.replace(/\s+/g, '').toLowerCase();
+    const all = [];
+    searchIdx.forEach(e => { const m = locate(e.text, key); if (m) all.push({ e, m }); });
+    const hits = all.slice(0, 60);
+    out.innerHTML = hits.length
+      ? `<p class="count">${all.length}건${all.length > hits.length ? ` 중 ${hits.length}건 표시` : ''}</p>` + hits.map(({ e, m }, i) =>
+        `<a href="#/${e.issue.id}" data-hit="${i}"><small>${esc(e.label)}</small><span>${snippetHtml(e.text, m)}</span></a>`).join('')
       : '<p class="empty">검색 결과가 없습니다.</p>';
-    out._hits = hits; out._q = q;
+    out._hits = hits.map(h => h.e); out._q = q;
   }
   function highlightDonors(q) {
     $$('.names span.hit').forEach(n => n.classList.remove('hit'));
@@ -313,7 +368,7 @@
     const mode = t.closest('[data-mode]');
     if (mode) { go(mode.dataset.mode === 'book' ? `#/${cur.id}/book/${book.page}` : `#/${cur.id}`); return; }
     const home = t.closest('[data-go="home"]');
-    if (home) { e.preventDefault(); go(view === 'read' ? `#/${cur.id}` : `#/${cur.id}`); window.scrollTo({ top: 0, behavior: 'smooth' }); return; }
+    if (home) { e.preventDefault(); go(`#/${LATEST.id}`); window.scrollTo({ top: 0, behavior: 'smooth' }); return; }
     const bk = t.closest('[data-bk]');
     if (bk) {
       const a = bk.dataset.bk;
@@ -330,8 +385,9 @@
       e.preventDefault();
       const out = $('#qOut'), h = out._hits[+hit.dataset.hit], q = out._q;
       closeLayers();
-      if (view !== 'read') { pendingSec = h.s.id; go(`#/${cur.id}`); } else scrollToSec(h.s.id);
-      if (h.donor) setTimeout(() => highlightDonors(q), 450);
+      if (h.page) { go(`#/${h.issue.id}/book/${h.page}`); return; }
+      if (view !== 'read' || h.issue.id !== cur.id) { pendingSec = h.s.id; go(`#/${h.issue.id}`); } else scrollToSec(h.s.id);
+      if (h.donor) setTimeout(() => highlightDonors(q), 600);
       return;
     }
     if (t.closest('#toTop')) window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -449,7 +505,7 @@
     startLoaderProgress();
     const t0 = Date.now();
     render();
-    const heroImg = new Promise(res => { const i = new Image(); i.onload = i.onerror = res; i.src = cur.dir + cur.hero; });
+    const heroImg = new Promise(res => { const i = new Image(); i.onload = i.onerror = res; i.src = cur.dir + (cur.hero || cur.cover); });
     const fonts = document.fonts && document.fonts.ready ? document.fonts.ready : Promise.resolve();
     const cap = new Promise(res => setTimeout(res, 5000));
     Promise.race([Promise.all([heroImg, fonts]), cap]).then(() => {
