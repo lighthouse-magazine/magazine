@@ -151,6 +151,9 @@
   const dkBg = p => `<img class="dk-bg" src="${photoSrc(p)}" alt="" loading="lazy" decoding="async">`;
   const dkOpen = s => `<section class="dk-slide" id="sec-${s.id}" data-sec="${s.id}">`;
 
+  // 후원금품 수입·사용 내역 표 (heart.report)
+  const reportHtml = r => `<div class="rep"><h4>${esc(r.title)}</h4><p class="per">${esc(r.period)} · ${esc(r.unit)}</p>${r.blocks.map(b => `<div class="rb"><h5>${esc(b.name)}<small>${esc(b.account)}</small></h5><div class="rc">${[['수입', b.income, b.incomeTotal], ['지출', b.expense, b.expenseTotal]].map(([t, rows, tot]) => `<table><caption>${t}</caption>${rows.map(([k, v]) => `<tr><th>${esc(k)}</th><td>${esc(v)}</td></tr>`).join('')}<tr class="t"><th>계</th><td>${esc(tot)}</td></tr></table>`).join('')}</div></div>`).join('')}<div class="rt"><span>총 수입 <b>${esc(r.total[0])}</b></span><span>총 지출 <b>${esc(r.total[1])}</b></span></div></div>`;
+
   function slideHtml(s, n) {
     const first = photoList(s)[0];
     if (s.kind === 'opening') {
@@ -161,6 +164,7 @@
       let b = '';
       if (wishes.length) b += `<div class="wish">${wishes.map(w => `<article><h4>${w.icon} ${esc(w.name)}</h4><ul>${w.items.map(i => `<li>${esc(i)}</li>`).join('')}</ul></article>`).join('')}</div>`;
       if (notes.length) b += `<div class="note">${notes.map(t => /041\)582-4495/.test(t) ? `<p>${esc(t).replace('041)582-4495', '<a href="tel:0415824495">041)582-4495</a>')}</p>` : `<p>${esc(t)}</p>`).join('')}</div>`;
+      if (s.report) b += reportHtml(s.report);
       if (illust.length) b += `<div class="illu">${illust.map(p => fig(p, s)).join('')}</div>`;
       if (donors.length) b += `<div class="donors"><h4 class="dh">함께해 주신 후원자님께 감사드립니다</h4>${donors.map((d, i) => {
         const list = d.names.split(/\s+/).filter(Boolean);
@@ -172,9 +176,10 @@
       return `<section class="dk-slide dk-light" id="sec-${s.id}" data-sec="${s.id}"><div class="dk-in">${dkHead(s, n, s.intro || '준비 중입니다.', 'help')}</div></section>`;
     }
     if (s.kind === 'company') {
-      const addr = s.info[0].replace(/^주소:\s*/, '').replace(/\s+/g, ' ');
-      const tel = s.info[1].replace(/^전화:\s*/, '').trim();
-      return `<section class="dk-slide dk-company" id="sec-${s.id}" data-sec="${s.id}">${dkBg(first)}<div class="dk-in"><div><div class="dk-head rv"><span class="no">${esc(s.no)}<i> / ${pad(n)}</i></span><h3>${esc(s.title)}</h3></div><div class="dk-co rv"><h4>${esc(s.company)}</h4><p>${esc(s.intro)}</p></div></div>${dkStrip(s)}<div class="dk-cinfo rv"><a class="btn ghost" target="_blank" rel="noopener" href="https://map.naver.com/p/search/${encodeURIComponent(addr)}">📍 ${esc(addr)}</a><a class="btn ghost" href="tel:${tel.replace(/\D/g, '')}">📞 ${esc(tel)}</a></div></div></section>`;
+      const info = s.info || [];
+      const addr = (info[0] || '').replace(/^주소:\s*/, '').replace(/\s+/g, ' ');
+      const tel = (info[1] || '').replace(/^전화:\s*/, '').trim();
+      return `<section class="dk-slide dk-company" id="sec-${s.id}" data-sec="${s.id}">${dkBg(first)}<div class="dk-in"><div><div class="dk-head rv"><span class="no">${esc(s.no)}<i> / ${pad(n)}</i></span><h3>${esc(s.title)}</h3></div><div class="dk-co rv"><h4>${esc(s.company)}</h4><p>${esc(s.intro)}</p></div></div>${dkStrip(s)}${addr || tel ? `<div class="dk-cinfo rv">${addr ? `<a class="btn ghost" target="_blank" rel="noopener" href="https://map.naver.com/p/search/${encodeURIComponent(addr)}">📍 ${esc(addr)}</a>` : ''}${tel ? `<a class="btn ghost" href="tel:${tel.replace(/\D/g, '')}">📞 ${esc(tel)}</a>` : ''}</div>` : ''}</div></section>`;
     }
     if (!first) return `<section class="dk-slide dk-light" id="sec-${s.id}" data-sec="${s.id}"><div class="dk-in">${dkHead(s, n)}</div></section>`;
     return `${dkOpen(s)}${dkBg(first)}<div class="dk-in">${dkHead(s, n)}${dkStrip(s)}</div></section>`;

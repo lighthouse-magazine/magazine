@@ -263,7 +263,10 @@ body.is-deck { overflow: hidden; }
 .dk-ph .cap b { display: block; font: clamp(16px, 1.8vw, 20px)/1.35 var(--f-disp); }
 
 /* 표지 */
+/* 표지는 책 표지처럼 배경 사진을 밝게 살리고, 글자가 있는 아래쪽만 어둡게 한다 */
+.dk-cover::after { background: linear-gradient(180deg, rgba(12, 6, 1, .22) 0%, rgba(12, 6, 1, 0) 28%, rgba(12, 6, 1, .08) 50%, rgba(12, 6, 1, .62) 100%); }
 .dk-cover .dk-in { justify-content: flex-end; }
+.dk-cover .dk-head .no { color: #fff; font-weight: 700; text-shadow: 0 1px 3px rgba(0, 0, 0, .9), 0 2px 12px rgba(0, 0, 0, .8); }
 .dk-cover .dk-head h3 { font-size: clamp(60px, 13vw, 150px); }
 .dk-cover .cta { display: flex; gap: 10px; flex-wrap: wrap; margin-top: clamp(16px, 3vh, 30px); }
 .dk-hint { display: flex; align-items: center; gap: 8px; margin-top: clamp(10px, 2vh, 24px); font-size: 15px; opacity: .85; }
@@ -352,3 +355,21 @@ body.is-deck { overflow: hidden; }
 .dk-company .dk-co p { font-size: clamp(14px, min(2vw, 2.3vh), 20px); line-height: 1.5; }
 .dk-company .dk-gal { flex-basis: clamp(120px, 28%, 320px); }
 .dk-cinfo .btn { padding: 8px 16px; font-size: 14px; }
+
+/* 후원금품 수입·사용 내역 */
+.rep { max-width: 980px; margin: 0 0 26px; }
+.rep h4 { font: clamp(22px, 4.6vw, 28px)/1.3 var(--f-disp); color: var(--moss); margin: 0 0 4px; }
+.rep .per { margin: 0 0 14px; color: var(--amber); font-weight: 700; font-size: 15px; }
+.rep .rb { background: var(--paper); border: 1px solid var(--line); border-radius: var(--r); padding: 14px 16px; margin-bottom: 12px; }
+.rep h5 { margin: 0 0 10px; font: 20px/1.3 var(--f-disp); color: var(--brown); display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; }
+.rep h5 small { font: 13px var(--f-body); color: var(--amber); }
+.rep .rc { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.rep table { width: 100%; border-collapse: collapse; font-size: 14.5px; }
+.rep caption { text-align: left; font: 700 15px var(--f-body); color: var(--moss); padding-bottom: 4px; }
+.rep th { text-align: left; font-weight: 400; padding: 4px 6px 4px 0; }
+.rep td { text-align: right; padding: 4px 0; font-variant-numeric: tabular-nums; }
+.rep tr + tr { border-top: 1px solid var(--line); }
+.rep tr.t { border-top: 2px solid var(--moss); font-weight: 700; }
+.rep .rt { display: flex; flex-wrap: wrap; gap: 8px 28px; justify-content: space-between; background: #fbefd5; border-radius: var(--r); padding: 12px 18px; color: var(--brown); font-size: 16px; }
+.rep .rt b { font: 700 20px var(--f-body); color: var(--deep); margin-left: 6px; }
+@media (max-width: 640px) { .rep .rc { grid-template-columns: 1fr; } }
