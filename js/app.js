@@ -8,6 +8,7 @@
   const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const nl = s => esc(s).replace(/\n/g, '<br>');
   const pad = n => String(n).padStart(2, '0');
+  ISS.forEach(i => (i.sections || []).forEach((s, k) => { s.no = pad(k + 1); }));   // 화면의 챕터 번호는 차례대로
 
   // 호수 종류: read(글+사진 읽기·책 보기), book(책으로 보기 전용), link(외부 사이트 연결)
   const kind = i => i.type || 'read';
@@ -22,6 +23,7 @@
   let pendingSec = null;
   const book = { page: 1, spread: window.innerWidth >= 900, zoom: false };
   let spy = null;
+  let deckIdx = 0;
 
   /* ================= 로딩 화면 (등대의집 표준 라이프사이클) ================= */
   const MSGS = ['환경 구성 중...', '데이터 로드 중...', '일정/세부 동기화 중...', '화면 구성 중...'];
@@ -40,6 +42,7 @@
       ld.classList.add('hide');
       $('#top').hidden = false;
       music.start();
+      narr.ready();
       setTimeout(() => { ld.style.display = 'none'; }, 350);
     }, 350);
   }
@@ -75,11 +78,14 @@
     if (r.issue) cur = r.issue;
     document.body.classList.toggle('is-book', view === 'book');
     document.body.classList.toggle('is-shelf', view === 'shelf');
+    document.body.classList.toggle('is-deck', view === 'read');
     $('#segRead').setAttribute('aria-selected', view === 'read');
     $('#segBook').setAttribute('aria-selected', view === 'book');
-    $('.seg').hidden = view === 'shelf' || kind(cur) !== 'read';   // 읽기/책 전환은 글 데이터가 있는 호만
+    $('.seg').hidden = view === 'shelf' || kind(cur) !== 'read' || !!cur.noBook;   // 읽기/책 전환은 글 데이터가 있는 호만
     document.title = view === 'shelf' ? '지난 호 | 등대매거진' : `${cur.title} ${cur.no} | 등대의집`;
+    applyBgm();
     buildChrome();
+    if (view === 'read') narr.setIssue(cur); else narr.leave();
     if (view === 'shelf') renderShelf();
     else if (view === 'book') { book.page = r.page; renderBook(); }
     else renderRead();
@@ -91,11 +97,9 @@
 
   function buildChrome() {
     if (kind(cur) === 'read') {
-      $('#chips').innerHTML = cur.sections.map(s => `<a href="#/${cur.id}" data-sec="${s.id}">${esc(s.title)}</a>`).join('');
       $('#tocList').innerHTML = cur.sections.map(s => `<li><a href="#/${cur.id}" data-sec="${s.id}"><b>${s.no}</b><span>${esc(s.title)}</span></a></li>`).join('');
     } else {
       // 책으로만 보는 호: 목차 대신 호수 이동 목록
-      $('#chips').innerHTML = '';
       $('#tocList').innerHTML = ISS.slice().reverse().map(i => kind(i) === 'link'
         ? `<li><a href="${esc(i.url)}" target="_blank" rel="noopener"><b>${i.id}</b><span>${esc(i.season)} ↗</span></a></li>`
         : `<li><a href="#/${i.id}"${i.id === cur.id ? ' aria-current="page"' : ''}><b>${i.id}</b><span>${esc(i.season)}</span></a></li>`).join('');
@@ -124,38 +128,61 @@
     const cap = p.cap ? `<figcaption>${p.desc ? `<b>${esc(p.cap)}</b>${esc(p.desc)}` : esc(p.cap)}</figcaption>` : '';
     return `<figure class="ph" style="--ar:${(sz[0] / sz[1]).toFixed(3)}"><button type="button" data-lb="${idx}" aria-label="${esc(label)} 크게 보기"><img src="${photoSrc(p)}" width="${sz[0]}" height="${sz[1]}" loading="lazy" decoding="async" alt="${esc(label)}"></button>${cap}</figure>`;
   }
-  const gal = (photos, sec, cls = '') => `<div class="gal ${cls}" style="--cd:${sec.cols || 3};${sec.asp ? `--asp:${sec.asp};` : ''}">${photos.map(p => fig(p, sec)).join('')}</div>`;
+  /* 읽기 모드는 챕터 한 개가 화면 한 장(deck). 사진은 화면 안에서 옆으로 넘긴다. */
+  const photoList = s => (s.groups ? s.groups.flatMap(g => g.photos) : s.photos) || [];
+  function dkCard(p, sec) {
+    const sz = SIZES[p.f] || [3, 2];
+    const ar = Math.max(0.72, Math.min(1.8, sz[0] / sz[1]));
+    const label = [sec.title, p.cap].filter(Boolean).join(' · ');
+    const idx = lbList.push({ src: photoSrc(p), cap: p.desc ? `${p.cap} — ${p.desc}` : (p.cap || sec.title), sec: sec.title }) - 1;
+    const cap = p.cap ? `<span class="cap">${p.desc ? `<b>${esc(p.cap)}</b>${esc(p.desc)}` : esc(p.cap)}</span>` : '';
+    return `<button type="button" class="dk-ph" data-lb="${idx}" style="--ar:${ar.toFixed(3)}" aria-label="${esc(label)} 크게 보기"><img src="${photoSrc(p)}" width="${sz[0]}" height="${sz[1]}" loading="lazy" decoding="async" alt="${esc(label)}">${cap}</button>`;
+  }
+  function dkStrip(s) {
+    const items = s.groups
+      ? s.groups.map(g => g.photos.map(p => dkCard(p, s)).join('')).join('')
+      : (s.photos || []).map(p => dkCard(p, s)).join('');
+    const many = (s.groups ? s.groups.reduce((c, g) => c + g.photos.length, 0) : (s.photos || []).length) > 1;
+    return `<div class="dk-gal rv"><div class="dk-strip">${items}</div>${many ? '<button type="button" class="dk-arw l" data-arw="-1" aria-label="이전 사진">‹</button><button type="button" class="dk-arw r" data-arw="1" aria-label="다음 사진">›</button><span class="dk-count" aria-hidden="true"></span>' : ''}</div>`;
+  }
+  const dkHead = (s, n, intro = s.intro, cls = '') =>
+    `<div class="dk-head rv"><span class="no">${esc(s.no)}<i> / ${pad(n)}</i></span><h3>${esc(s.title)}</h3>${intro ? `<p${cls ? ` class="${cls}"` : ''}>${nl(intro)}</p>` : ''}</div>`;
+  // 챕터 배경: 대표 사진을 흑백으로(CSS) 깔고, 아래 사진 카드는 컬러로 둔다
+  const dkBg = p => `<img class="dk-bg" src="${photoSrc(p)}" alt="" loading="lazy" decoding="async">`;
+  const dkOpen = s => `<section class="dk-slide" id="sec-${s.id}" data-sec="${s.id}">`;
 
-  function secHtml(s) {
-    let h = `<section class="sec" id="sec-${s.id}" data-sec="${s.id}"><div class="wrap"><div class="sec-head"><span class="no">${s.no}</span><h3>${esc(s.title)}</h3></div>`;
+  function slideHtml(s, n) {
+    const first = photoList(s)[0];
     if (s.kind === 'opening') {
-      h += `<div class="opening"><p class="quote">${nl(s.quote)}</p><div class="orn">◆ ◆ ◆</div><p>${nl(s.body)}</p><p>${nl(s.closing)}</p></div>`;
-    } else if (s.kind === 'heart') {
-      h += `<p class="lead">${esc(s.intro)}</p>`;
-      h += `<div class="wish">${s.wishes.map(w => `<article><h4>${w.icon} ${esc(w.name)}</h4><ul>${w.items.map(i => `<li>${esc(i)}</li>`).join('')}</ul></article>`).join('')}</div>`;
-      h += `<div class="note">${s.notes.map(n => /041\)582-4495/.test(n) ? `<p>${esc(n).replace('041)582-4495', '<a href="tel:0415824495">041)582-4495</a>')}</p>` : `<p>${esc(n)}</p>`).join('')}</div>`;
-      h += `<div class="illu">${s.illust.map(p => fig(p, s)).join('')}</div>`;
-      h += `<div class="donors"><h4 class="dh">함께해 주신 후원자님께 감사드립니다</h4>${s.donors.map((d, i) => {
+      return `<section class="dk-slide dk-open" id="sec-${s.id}" data-sec="${s.id}"><div class="dk-in">${dkHead(s, n, '')}<div class="dk-quote rv"><p class="q">${nl(s.quote)}</p><div class="orn">◆ ◆ ◆</div><p>${nl(s.body)}</p><p>${nl(s.closing)}</p></div></div></section>`;
+    }
+    if (s.kind === 'heart') {
+      const wishes = s.wishes || [], notes = s.notes || [], illust = s.illust || [], donors = s.donors || [];
+      let b = '';
+      if (wishes.length) b += `<div class="wish">${wishes.map(w => `<article><h4>${w.icon} ${esc(w.name)}</h4><ul>${w.items.map(i => `<li>${esc(i)}</li>`).join('')}</ul></article>`).join('')}</div>`;
+      if (notes.length) b += `<div class="note">${notes.map(t => /041\)582-4495/.test(t) ? `<p>${esc(t).replace('041)582-4495', '<a href="tel:0415824495">041)582-4495</a>')}</p>` : `<p>${esc(t)}</p>`).join('')}</div>`;
+      if (illust.length) b += `<div class="illu">${illust.map(p => fig(p, s)).join('')}</div>`;
+      if (donors.length) b += `<div class="donors"><h4 class="dh">함께해 주신 후원자님께 감사드립니다</h4>${donors.map((d, i) => {
         const list = d.names.split(/\s+/).filter(Boolean);
-        return `<details class="dn" id="dn-${i}" ${i === 0 ? 'open' : ''}><summary><span>${esc(d.name)}</span><i>${list.length}</i></summary><div class="names">${list.map(n => `<span>${esc(n)}</span>`).join('')}</div></details>`;
+        return `<details class="dn" id="dn-${i}" ${i === 0 ? 'open' : ''}><summary><span>${esc(d.name)}</span><i>${list.length}</i></summary><div class="names">${list.map(x => `<span>${esc(x)}</span>`).join('')}</div></details>`;
       }).join('')}</div>`;
-    } else if (s.kind === 'company') {
-      h += `<div class="company"><h4>${esc(s.company)}</h4><p>${esc(s.intro)}</p></div>`;
-      h += gal(s.photos, s);
+      return `<section class="dk-slide dk-light" id="sec-${s.id}" data-sec="${s.id}"><div class="dk-in">${dkHead(s, n, s.intro, wishes.length ? '' : 'help')}${b ? `<div class="dk-scroll rv">${b}</div>` : ''}</div></section>`;
+    }
+    if (s.kind === 'company' && s.pending) {
+      return `<section class="dk-slide dk-light" id="sec-${s.id}" data-sec="${s.id}"><div class="dk-in">${dkHead(s, n, s.intro || '준비 중입니다.', 'help')}</div></section>`;
+    }
+    if (s.kind === 'company') {
       const addr = s.info[0].replace(/^주소:\s*/, '').replace(/\s+/g, ' ');
       const tel = s.info[1].replace(/^전화:\s*/, '').trim();
-      h += `<div class="cinfo"><a class="btn ghost" target="_blank" rel="noopener" href="https://map.naver.com/p/search/${encodeURIComponent(addr)}">📍 ${esc(addr)}</a><a class="btn ghost" href="tel:${tel.replace(/\D/g, '')}">📞 ${esc(tel)}</a></div>`;
-    } else {
-      if (s.intro) h += `<p class="lead">${nl(s.intro)}</p>`;
-      if (s.groups) h += s.groups.map(g => `<h4 class="sub">${esc(g.sub)}</h4>${gal(g.photos, s)}`).join('');
-      else if (s.photos) h += gal(s.photos, s, s.variant === 'tiles' ? 'tiles' : (s.photos.some(p => p.desc) ? 'cards' : ''));
+      return `<section class="dk-slide dk-company" id="sec-${s.id}" data-sec="${s.id}">${dkBg(first)}<div class="dk-in"><div><div class="dk-head rv"><span class="no">${esc(s.no)}<i> / ${pad(n)}</i></span><h3>${esc(s.title)}</h3></div><div class="dk-co rv"><h4>${esc(s.company)}</h4><p>${esc(s.intro)}</p></div></div>${dkStrip(s)}<div class="dk-cinfo rv"><a class="btn ghost" target="_blank" rel="noopener" href="https://map.naver.com/p/search/${encodeURIComponent(addr)}">📍 ${esc(addr)}</a><a class="btn ghost" href="tel:${tel.replace(/\D/g, '')}">📞 ${esc(tel)}</a></div></div></section>`;
     }
-    return h + '</div></section>';
+    if (!first) return `<section class="dk-slide dk-light" id="sec-${s.id}" data-sec="${s.id}"><div class="dk-in">${dkHead(s, n)}</div></section>`;
+    return `${dkOpen(s)}${dkBg(first)}<div class="dk-in">${dkHead(s, n)}${dkStrip(s)}</div></section>`;
   }
 
   function renderRead() {
     lbList = [];
-    const toc = cur.sections.map(s => `<a href="#/${cur.id}" data-sec="${s.id}"><b>${s.no}</b><span>${esc(s.title)}</span></a>`).join('');
+    const n = cur.sections.length;
     const colo = cur.colophon.map(([k, v]) => {
       let val = esc(v);
       if (k === '전화') val = `<a href="tel:${v.replace(/\D/g, '')}">${val}</a>`;
@@ -163,39 +190,100 @@
       if (k === '주소') val = `<a href="https://map.naver.com/p/search/${encodeURIComponent(v.replace(/^우\)\d+\s*/, ''))}" target="_blank" rel="noopener">${val}</a>`;
       return `<dt>${esc(k)}</dt><dd>${val}</dd>`;
     }).join('');
-    app.innerHTML = `
-      <div class="hero" style="--hero:url('${new URL(cur.dir + cur.hero, location.href).href}')">
-        <div class="hero-in">
-          <small>${esc(cur.no)} · ${esc(cur.season)}</small>
-          <h2>${esc(cur.title)}</h2>
-          <p>${esc(cur.subtitle)}</p>
-          <div class="cta"><a class="btn" href="#/${cur.id}" data-sec="${cur.sections[0].id}">읽기 시작</a><a class="btn ghost" href="#/${cur.id}/book/1">책으로 보기</a></div>
-        </div>
-      </div>
-      <div class="wrap"><nav class="toc-cards" aria-label="목차">${toc}</nav></div>
-      ${cur.sections.map(secHtml).join('')}
-      <footer class="colophon">
-        <img class="logo" src="https://lh3.googleusercontent.com/d/18qeVrRkZh3BM0LTUcO35E-cmWcCIssJg" onerror="this.onerror=null;this.src='assets/ci.png'" alt="등대의집 CI">
-        <h5>${esc(cur.title)} ${esc(cur.no)}</h5>
-        <dl>${colo}</dl>
-      </footer>`;
+    const cover = `<section class="dk-slide dk-cover" id="sec-cover" data-sec="cover"><img class="dk-bg" src="${cur.dir}${cur.hero}" alt="" decoding="async"><div class="dk-in"><div class="dk-head rv"><span class="no">${esc(cur.no)} · ${esc(cur.season)}</span><h3>${esc(cur.title)}</h3><p>${esc(cur.subtitle)}</p><div class="cta"><a class="btn" href="#/${cur.id}" data-sec="${cur.sections[0].id}">읽기 시작</a>${cur.noBook ? '' : `<a class="btn ghost" href="#/${cur.id}/book/1">책으로 보기</a>`}</div></div><div class="dk-hint rv" aria-hidden="true">아래로 넘겨 보세요<svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></div></div></section>`;
+    const end = `<section class="dk-slide dk-light dk-end" id="sec-end" data-sec="end"><div class="dk-in"><div class="rv"><img class="logo" src="https://lh3.googleusercontent.com/d/18qeVrRkZh3BM0LTUcO35E-cmWcCIssJg" onerror="this.onerror=null;this.src='assets/ci.png'" alt="등대의집 CI"><h5>${esc(cur.title)} ${esc(cur.no)}</h5><dl>${colo}</dl><div class="cta">${cur.noBook ? '' : `<a class="btn ghost" href="#/${cur.id}/book/1">책으로 보기</a>`}<a class="btn ghost" href="#/shelf">지난 호 보기</a></div></div></div></section>`;
+    const dots = [['cover', '표지']].concat(cur.sections.map(s => [s.id, s.title]), [['end', '판권']])
+      .map(([id, t]) => `<a href="#/${cur.id}" data-sec="${id}" data-t="${esc(t)}" aria-label="${esc(t)}"></a>`).join('');
+    app.innerHTML = `<div class="deck" id="deck" tabindex="0" aria-label="${esc(cur.title)} ${esc(cur.no)}">${cover}${cur.sections.map(s => slideHtml(s, n)).join('')}${end}</div><nav class="dk-dots" aria-label="챕터 이동">${dots}</nav>`;
     setupSpy();
   }
 
   function setupSpy() {
     if (spy) spy.disconnect();
-    spy = new IntersectionObserver(es => {
-      es.forEach(e => {
-        if (!e.isIntersecting) return;
-        const id = e.target.dataset.sec;
-        $$('#chips a').forEach(a => {
-          const on = a.dataset.sec === id;
-          a.classList.toggle('on', on);
-          if (on) { const c = $('#chips'); c.scrollTo({ left: a.offsetLeft - c.clientWidth / 2 + a.clientWidth / 2, behavior: 'smooth' }); }
-        });
+    const deck = $('#deck'), slides = $$('.dk-slide', deck), dots = $$('.dk-dots a');
+    $('#prog').style.width = '0';
+    spy = new IntersectionObserver(es => es.forEach(e => {
+      if (!e.isIntersecting) return;
+      e.target.classList.add('in');
+      narr.enter(e.target.dataset.sec);
+      $$('.dk-gal', e.target).forEach(g => { if (g._pad) { g._pad(); g._upd(); } });
+      deckIdx = slides.indexOf(e.target);
+      dots.forEach((a, i) => a.classList.toggle('on', i === deckIdx));
+    }), { root: deck, threshold: 0.55 });
+    slides.forEach(s => spy.observe(s));
+    setupStrips();
+    deck.addEventListener('scroll', () => {
+      const max = deck.scrollHeight - deck.clientHeight;
+      $('#prog').style.width = (max > 0 ? Math.min(100, deck.scrollTop / max * 100) : 0) + '%';
+    }, { passive: true });
+    deck.focus({ preventScroll: true });
+  }
+
+  // 사진 줄: 넘기면 사진이 정확히 가운데에 멈추고, 가운데 사진만 밝고 크게 보인다(좌우는 어두운 막 + 약간 작게).
+  // 스크롤 중에는 가운데 사진이 바뀔 때만 클래스를 바꾼다(그림 읽기·필터 없음, 다운로드 추가 없음).
+  function setupStrips() {
+    $$('.dk-gal').forEach(g => {
+      const strip = $('.dk-strip', g), items = Array.from(strip.children);
+      const photos = items.filter(c => c.classList.contains('dk-ph'));
+      const cnt = $('.dk-count', g), prev = $('.dk-arw.l', g), next = $('.dk-arw.r', g);
+      let cur = -1, raf = 0;
+      // 첫·마지막 사진도 가운데에 올 수 있도록 양끝 여백을 둔다
+      g._pad = () => {
+        const f = items[0], l = items[items.length - 1];
+        strip.style.paddingLeft = Math.max(0, (strip.clientWidth - f.offsetWidth) / 2) + 'px';
+        strip.style.paddingRight = Math.max(0, (strip.clientWidth - l.offsetWidth) / 2) + 'px';
+      };
+      const upd = g._upd = () => {
+        raf = 0;
+        const r = strip.getBoundingClientRect(), mid = r.left + r.width / 2;
+        let best = 0, bd = Infinity;
+        items.forEach((c, i) => { const b = c.getBoundingClientRect(), d = Math.abs(b.left + b.width / 2 - mid); if (d < bd) { bd = d; best = i; } });
+        if (best === cur) return;
+        if (items[cur]) items[cur].classList.remove('cur');
+        items[best].classList.add('cur'); cur = best;
+        const ph = photos.indexOf(items[best]) >= 0 ? items[best] : items.slice(best).find(c => photos.includes(c));
+        if (cnt) cnt.textContent = `${Math.max(0, photos.indexOf(ph)) + 1} / ${photos.length}`;
+        if (prev) prev.disabled = best === 0;
+        if (next) next.disabled = best === items.length - 1;
+      };
+      g._go = d => {
+        const t = items[Math.max(0, Math.min(items.length - 1, cur + d))];
+        strip.scrollTo({ left: t.offsetLeft - (strip.clientWidth - t.offsetWidth) / 2, behavior: 'smooth' });
+      };
+      strip.addEventListener('scroll', () => { if (!raf) raf = requestAnimationFrame(upd); }, { passive: true });
+      g._pad(); upd();
+      // 마우스로 끌어서 넘기기 (터치는 기본 스와이프). 놓으면 가장 가까운 사진이 가운데로 붙는다.
+      let down = null;
+      strip.addEventListener('pointerdown', e => {
+        if (e.pointerType !== 'mouse' || e.button !== 0) return;
+        down = { x: e.clientX, sl: strip.scrollLeft, moved: false };
       });
-    }, { rootMargin: '-30% 0px -65% 0px' });
-    $$('.sec').forEach(s => spy.observe(s));
+      window.addEventListener('pointermove', e => {
+        if (!down || !g.isConnected) return;
+        const dx = e.clientX - down.x;
+        if (!down.moved && Math.abs(dx) > 6) { down.moved = true; strip.style.scrollSnapType = 'none'; strip.style.scrollBehavior = 'auto'; strip.classList.add('drag'); }
+        if (down.moved) strip.scrollLeft = down.sl - dx;
+      });
+      window.addEventListener('pointerup', () => {
+        if (!down) return;
+        if (down.moved) { dragged = true; setTimeout(() => { dragged = false; }, 0); }
+        down = null; strip.style.scrollSnapType = ''; strip.style.scrollBehavior = ''; strip.classList.remove('drag');
+      });
+    });
+  }
+  let dragged = false;
+  document.addEventListener('click', e => { if (dragged) { e.stopPropagation(); e.preventDefault(); } }, true);
+
+  // 키보드로 챕터 이동. 마음 더하기처럼 화면 안에서 스크롤되는 챕터는 안쪽을 끝까지 본 뒤 넘어간다.
+  function deckStep(d) {
+    const slides = $$('.dk-slide');
+    const sc = slides[deckIdx] && $('.dk-scroll', slides[deckIdx]);
+    if (sc && sc.scrollHeight > sc.clientHeight + 2) {
+      const room = d > 0 ? sc.scrollHeight - sc.clientHeight - sc.scrollTop : sc.scrollTop;
+      if (room > 2) { sc.scrollBy({ top: d * sc.clientHeight * 0.8, behavior: 'smooth' }); return; }
+    }
+    const t = slides[Math.max(0, Math.min(slides.length - 1, deckIdx + d))];
+    if (t) t.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
   /* ================= 책으로 보기 ================= */
@@ -362,6 +450,8 @@
     const t = e.target;
     const sec = t.closest('[data-sec]');
     if (sec && sec.tagName === 'A') { e.preventDefault(); goSection(sec.dataset.sec); return; }
+    const arw = t.closest('[data-arw]');
+    if (arw) { arw.parentElement._go(+arw.dataset.arw); return; }
     const lb = t.closest('[data-lb]');
     if (lb) { lbShow(+lb.dataset.lb); openLayer($('#lb')); return; }
     if (t.closest('[data-close]')) { closeLayers(); return; }
@@ -389,7 +479,6 @@
       if (h.donor) setTimeout(() => highlightDonors(q), 600);
       return;
     }
-    if (t.closest('#toTop')) window.scrollTo({ top: 0, behavior: 'smooth' });
   });
 
   $('#btnToc').addEventListener('click', () => openLayer($('#drawer')));
@@ -412,6 +501,10 @@
       if (e.key === 'ArrowRight') lbShow(lbIdx + 1);
       return;
     }
+    if (view === 'read' && !hasLayer() && (document.activeElement === document.body || document.activeElement.closest('#deck, .dk-dots'))) {
+      const d = { ArrowDown: 1, PageDown: 1, ArrowUp: -1, PageUp: -1 }[e.key];
+      if (d) { e.preventDefault(); deckStep(d); }
+    }
     if (view === 'book' && !hasLayer() && !/INPUT|TEXTAREA/.test(document.activeElement.tagName)) {
       if (e.key === 'ArrowLeft') bookStep(-1);
       if (e.key === 'ArrowRight') bookStep(1);
@@ -428,25 +521,21 @@
     else if (view === 'book' && !book.zoom && e.target.closest('#stage')) bookStep(dx < 0 ? 1 : -1);
   }, { passive: true });
 
-  // 맨 위로 버튼 / 읽기 진행바
-  const toTop = document.createElement('button');
-  toTop.id = 'toTop'; toTop.className = 'toTop'; toTop.setAttribute('aria-label', '맨 위로');
-  toTop.innerHTML = '<svg viewBox="0 0 24 24"><path d="m6 14 6-6 6 6"/></svg>';
-  document.body.appendChild(toTop);
-  let ticking = false;
-  window.addEventListener('scroll', () => {
-    if (ticking) return;
-    ticking = true;
-    requestAnimationFrame(() => {
-      const h = document.documentElement;
-      const max = h.scrollHeight - h.clientHeight;
-      $('#prog').style.width = (max > 0 ? Math.min(100, h.scrollTop / max * 100) : 0) + '%';
-      toTop.classList.toggle('on', h.scrollTop > 700 && view === 'read');
-      ticking = false;
-    });
-  }, { passive: true });
   window.addEventListener('hashchange', render);
-  window.addEventListener('resize', () => { if (view === 'book') drawBook(); });
+  window.addEventListener('resize', () => { if (view === 'book') drawBook(); else if (view === 'read') $$('.dk-gal').forEach(g => { if (g._pad) { g._pad(); g._upd(); } }); });
+
+  /* ================= 호별 배경음악 ================= */
+  // 호 폴더의 mp3(issue.bgm)를 쓰고, 곡이 없는 지난 호는 가장 최신 호의 곡을 쓴다. 재생 중이면 곡만 바꿔 이어서 튼다.
+  function applyBgm() {
+    const au = $('#bgm'), pick = (cur && cur.bgm) ? cur : (LATEST && LATEST.bgm ? LATEST : null);
+    if (!au || !pick) return;
+    const src = pick.dir + pick.bgm + (pick.ver ? '?v=' + pick.ver : '');
+    if (au.getAttribute('src') === src) return;
+    const was = !au.paused;
+    au.setAttribute('src', src);
+    if (was) au.play().catch(() => {});
+  }
+  applyBgm();
 
   /* ================= 배경음악 ================= */
   // 브라우저는 소리 자동재생을 막는다. 열자마자 시도하고, 막히면 첫 터치/키 입력에서 시작한다.
@@ -495,7 +584,76 @@
         paint();
         if (!wanted) return;
         play().then(ok => { if (!ok) { armGesture(); toast('화면을 터치하면 배경음악이 시작돼요 ♪'); } });
-      }
+      },
+      duck(on) { if (!au.paused) fade(on ? 0.12 : VOL); }   // 나레이션이 나오는 동안 배경음악을 작게
+    };
+  })();
+
+  /* ================= 나레이션 ================= */
+  // 호 폴더의 voice/index.json({챕터id: mp3})이 있는 호만. 읽기 모드에서 챕터가 자리 잡으면 그 챕터 mp3를 읽어 준다.
+  // 챕터를 넘기면 바로 끊고, 재생 중에는 배경음악을 낮춘다. 켜기/끄기는 기억한다.
+  const narr = (() => {
+    const au = new Audio(), btn = $('#btnNar'), KEY = 'lh-nar-off';
+    const lists = {};   // 호 id → 목록(없으면 null)
+    let on = true, idx = null, want = null, timer = 0, ready = false, armed = false;
+    try { on = localStorage.getItem(KEY) !== '1'; } catch (e) { /* 저장 불가 환경 */ }
+    au.preload = 'none';
+    const paint = () => {
+      btn.hidden = !idx || view !== 'read';
+      btn.classList.toggle('off', !on);
+      btn.classList.toggle('playing', on && !au.paused);
+      btn.setAttribute('aria-pressed', String(on));
+      btn.title = on ? '나레이션 끄기' : '나레이션 켜기';
+    };
+    const stop = () => { clearTimeout(timer); au.pause(); music.duck(false); paint(); };
+    function play(id) {
+      if (!on || !idx || !ready || view !== 'read' || !id) return;
+      const f = idx[id];
+      if (!f) { stop(); return; }
+      au.src = cur.dir + 'voice/' + f + (cur.ver ? '?v=' + cur.ver : '');
+      au.play().then(() => { music.duck(true); paint(); }).catch(() => { paint(); arm(); });
+    }
+    // 브라우저가 소리를 막으면 첫 터치·키 입력에서 지금 챕터 나레이션을 시작한다
+    function arm() {
+      if (armed) return;
+      armed = true;
+      if (!$('#toast.on')) toast('화면을 터치하면 나레이션이 시작돼요 ♪');
+      const evs = ['pointerdown', 'keydown', 'touchend'];
+      const h = e => {
+        if (e.target.closest && e.target.closest('#btnNar')) return;
+        evs.forEach(n => document.removeEventListener(n, h, true));
+        armed = false;
+        play(want);
+      };
+      evs.forEach(n => document.addEventListener(n, h, true));
+    }
+    au.addEventListener('ended', () => { music.duck(false); paint(); });
+    au.addEventListener('pause', paint);
+    btn.addEventListener('click', () => {
+      on = !on;
+      try { localStorage.setItem(KEY, on ? '0' : '1'); } catch (e) { /* 무시 */ }
+      if (on) play(want); else stop();
+      paint();
+      toast(on ? '나레이션을 켰어요' : '나레이션을 껐어요');
+    });
+    document.addEventListener('visibilitychange', () => { if (document.hidden) stop(); });
+    return {
+      async setIssue(issue) {
+        if (!(issue.id in lists)) {
+          lists[issue.id] = null;
+          try {
+            const r = await fetch(issue.dir + 'voice/index.json' + (issue.ver ? '?v=' + issue.ver : ''));
+            if (r.ok) lists[issue.id] = await r.json();
+          } catch (e) { /* 나레이션 없는 호 */ }
+        }
+        if (cur.id !== issue.id) return;
+        idx = lists[issue.id];
+        paint();
+        if (want) play(want);
+      },
+      enter(id) { want = id; stop(); timer = setTimeout(() => play(id), 450); },   // 챕터가 자리 잡은 뒤 재생
+      ready() { ready = true; if (want) play(want); },
+      leave() { want = null; stop(); }
     };
   })();
 
