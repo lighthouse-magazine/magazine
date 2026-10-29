@@ -610,7 +610,7 @@
       if (!on || !idx || !ready || view !== 'read' || !id) return;
       const f = idx[id];
       if (!f) { stop(); return; }
-      au.src = cur.dir + 'voice/' + f + (cur.ver ? '?v=' + cur.ver : '');
+      au.src = cur.dir + 'voice/' + f + (f.includes('?') ? '' : (cur.ver ? '?v=' + cur.ver : ''));
       au.play().then(() => { music.duck(true); paint(); }).catch(() => { paint(); arm(); });
     }
     // 브라우저가 소리를 막으면 첫 터치·키 입력에서 지금 챕터 나레이션을 시작한다
